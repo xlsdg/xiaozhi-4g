@@ -33,6 +33,7 @@ jobs:
         with:
           ref: dual
           fetch-depth: 0
+          persist-credentials: false
 
       # dual = newest upstream tag + the port commit(s). Rebase keeps the port a
       # clean delta on top of upstream instead of interleaving merge history.
@@ -93,7 +94,11 @@ jobs:
 
       - name: Persist rebased port
         if: steps.check.outputs.skip != 'true'
-        run: git push --force-with-lease=dual:${{ steps.sync.outputs.orig_sha }} origin HEAD:dual
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git push --force-with-lease=dual:${{ steps.sync.outputs.orig_sha }} \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:dual
 
       - name: Publish release
         if: steps.check.outputs.skip != 'true'
@@ -108,6 +113,7 @@ jobs:
             Updates are manual over USB only.
 
             Upstream: `${{ steps.sync.outputs.upstream_tag }}`
+            Licensed MIT; includes code from 78/xiaozhi-esp32.
 
             Flash from the browser: https://xlsdg.org/xiaozhi-4g/ (Chrome/Edge), or:
             ```
@@ -124,6 +130,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: actions/checkout@v7
         with:
+          ref: main
           path: main-src
           sparse-checkout: pages
 

@@ -9,6 +9,8 @@ networking is upstream [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) c
 - Updates: manual over USB only, see [Updates](#updates)
 - Two branches, see [Repository layout](#repository-layout):
   `main` (this branch: CI, flasher page, docs) and `dual` (upstream + the port commit)
+- License: MIT. Firmware builds contain code from
+  [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) (MIT, © Shenzhen Xinzhi Future Technology Co., Ltd. and contributors).
 
 ## Repository layout
 
@@ -47,8 +49,8 @@ flash over USB): <https://xlsdg.org/xiaozhi-4g/>. The page is served by GitHub P
 the latest build's `merged-binary.bin` (release downloads redirect without CORS headers, so the
 browser cannot fetch them directly) and writes it at `0x0`, with an **Erase device** option. Its
 **Logs & Console** entry shows the serial log. It is the quickest fix for a board that no longer
-boots. Older builds are only on [Releases](https://github.com/xlsdg/xiaozhi-4g/releases); flash
-those with esptool.
+boots. Older builds are only on [Releases](https://github.com/xlsdg/xiaozhi-4g/releases), and only
+the 3 newest are kept; flash those with esptool.
 
 ## Button gestures (BOOT)
 
