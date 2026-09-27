@@ -149,6 +149,7 @@ jobs:
           {
             "name": "xiaozhi-4g dual (LCKFB SZPI ESP32-S3 + ML307)",
             "version": "$REL_TAG",
+            "size": $(stat -c%s build/merged-binary.bin),
             "new_install_prompt_erase": true,
             "builds": [{
               "chipFamily": "ESP32-S3",

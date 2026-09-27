@@ -383,18 +383,23 @@ fetch("manifest.json").then((r) => r.json()).then((m) => {
   if (!part) return;
   state.offset = Number(part.offset) || 0;
   $("offset").textContent = "0x" + state.offset.toString(16);
-  fetch(part.path, { method: "HEAD" }).then((r) => {
-    const len = Number(r.headers.get("content-length"));
-    if (len) {
-      state.size = len;
-      $("size").textContent = (len / 1048576).toFixed(1) + " MB";
-      setPhase(state.phase);
-    }
+  if (Number(m.size)) showSize(Number(m.size));
+  else fetch(part.path, { method: "HEAD" }).then((r) => {
+    // A compressed response reports the compressed length, which is not the image size.
+    if (r.headers.get("content-encoding")) return;
+    showSize(Number(r.headers.get("content-length")));
   }).catch(() => {});
 }).catch(() => {
   ["build", "target", "offset", "size"].forEach((id) => { $(id).textContent = "unavailable"; });
   write("manifest.json could not be read, so this page does not know what to write.\n");
 });
+
+function showSize(bytes) {
+  if (!bytes) return;
+  state.size = bytes;
+  $("size").textContent = (bytes / 1048576).toFixed(1) + " MB";
+  setPhase(state.phase);
+}
 
 let imagePromise = null;
 
@@ -411,10 +416,8 @@ async function loadImage() {
   const resp = await fetch(part.path);
   if (!resp.ok) throw new Error("Downloading " + part.path + " failed: " + resp.status);
   state.image = new Uint8Array(await resp.arrayBuffer());
-  state.size = state.image.length;
-  $("size").textContent = (state.size / 1048576).toFixed(1) + " MB";
+  showSize(state.image.length);
   write("Image ready, " + (state.size / 1048576).toFixed(1) + " MB.\n");
-  setPhase(state.phase);
 }
 
 // ---------------------------------------------------------------- connection
