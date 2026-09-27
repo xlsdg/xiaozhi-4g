@@ -3,32 +3,727 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>xiaozhi-4g dual - flash over USB</title>
-<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<title>Flash xiaozhi-4g dual over USB</title>
+<meta name="description" content="Browser flasher for the LCKFB SZPI ESP32-S3 board with an ML307 4G module.">
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
 <style>
-  body { font: 16px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 42rem; padding: 2rem 1.5rem; }
-  code { background: #f4f4f5; padding: .1rem .3rem; border-radius: 3px; }
-  li { margin-bottom: .4rem; }
-  footer { margin-top: 2rem; color: #666; font-size: 14px; }
+  :root {
+    --ground: #0c0e0d;
+    --panel: #121615;
+    --edge: #262c2a;
+    --silk: #e7ebe6;
+    --muted: #98a29b;
+    --gold: #e3b457;
+    --warn: #f0906e;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box }
+  [hidden] { display: none !important }
+  html { color-scheme: dark }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--silk);
+    font: 16px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 2.75rem 1.25rem 3.5rem }
+
+  /* Silkscreen type: mono, wide tracking, uppercase. */
+  .k {
+    font-family: var(--mono);
+    font-size: .6875rem;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem 1.5rem }
+  h1 { margin: .5rem 0 0; font-size: clamp(1.6rem, 5vw, 2.1rem); font-weight: 600; letter-spacing: -.015em }
+  .status { display: flex; align-items: center; gap: .5rem; margin: 0; font: 400 .8125rem/1.4 var(--mono); color: var(--muted) }
+  .led { flex: none; width: 7px; height: 7px; border-radius: 50%; background: transparent; border: 1px solid var(--muted) }
+  .led[data-state="ready"] {
+    border-color: var(--gold);
+    background: var(--gold);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 22%, transparent);
+    animation: breathe 2.6s ease-in-out infinite;
+  }
+  .led[data-state="off"] { border-color: var(--warn) }
+  .led[data-state="busy"] { border-color: var(--gold); background: var(--gold); animation: breathe .9s ease-in-out infinite }
+  @keyframes breathe { 50% { opacity: .35 } }
+  .lede { margin: .75rem 0 0; max-width: 38rem; color: var(--muted) }
+  .lede strong { color: var(--silk); font-weight: 600 }
+
+  .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 1px; background: var(--edge); border: 1px solid var(--edge); margin: 2rem 0 0 }
+  .readout > div { background: var(--ground); padding: .7rem .85rem }
+  .readout dd { margin: .3rem 0 0; font: 500 .9375rem/1.3 var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere }
+
+  h2.k { margin: 2.5rem 0 .9rem; padding-bottom: .5rem; border-bottom: 1px solid var(--edge) }
+
+  /* Step rail: one numbered row per action, disabled until the row above is done. */
+  ol.rail { list-style: none; margin: 0; padding: 0; border: 1px solid var(--edge); background: var(--panel) }
+  ol.rail > li { display: grid; grid-template-columns: 2.4rem 1fr; border-top: 1px solid var(--edge) }
+  ol.rail > li:first-child { border-top: 0 }
+  .step-num { padding: .85rem 0 0; text-align: center; font: 500 .75rem/1.6 var(--mono); color: var(--muted) }
+  li[data-phase="active"] .step-num, li[data-phase="done"] .step-num { color: var(--gold) }
+  li[data-phase="failed"] .step-num { color: var(--warn) }
+  .step-body { padding: .8rem .9rem .9rem 0; min-width: 0 }
+  .step-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem .75rem; margin: 0 }
+  .step-title h3 { margin: 0; font-size: .9375rem; font-weight: 600 }
+  .badge { font: 400 .6875rem/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted) }
+  .badge[data-kind="busy"] { color: var(--gold) }
+  .badge[data-kind="ok"] { color: var(--gold) }
+  .badge[data-kind="bad"] { color: var(--warn) }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem .8rem; margin-top: .6rem }
+
+  button {
+    font: 600 .875rem/1.2 var(--sans);
+    color: #14100a;
+    background: var(--gold);
+    border: 0;
+    border-radius: 2px;
+    padding: .6rem 1rem;
+    cursor: pointer;
+    transition: background .15s ease, transform .06s ease;
+  }
+  button:hover:not(:disabled) { background: #eec26a }
+  button:active:not(:disabled) { transform: translateY(1px); background: #d3a344 }
+  button:disabled { background: #232927; color: #6c736e; cursor: not-allowed }
+  button.ghost { background: none; border: 1px solid var(--edge); color: var(--muted); font: 500 .6875rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; padding: .45rem .6rem }
+  button.ghost:hover:not(:disabled) { background: none; color: var(--gold); border-color: color-mix(in srgb, var(--gold) 50%, transparent) }
+  button.ghost:active:not(:disabled) { background: color-mix(in srgb, var(--gold) 12%, transparent); transform: translateY(1px) }
+  button.ghost:disabled { background: none; border-color: var(--edge); color: #6c736e }
+  button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 2px }
+
+  label.check { display: inline-flex; align-items: center; gap: .5rem; font-size: .875rem; cursor: pointer }
+  label.check:has(input:disabled) { color: var(--muted); cursor: not-allowed }
+  input[type="checkbox"] { width: 1rem; height: 1rem; margin: 0; accent-color: var(--gold); flex: none }
+  .note { margin: .5rem 0 0; font-size: .8125rem; line-height: 1.55; color: var(--muted) }
+
+  .meter { margin-top: .8rem }
+  .meter-line { display: flex; flex-wrap: wrap; gap: .35rem .9rem; font: 400 .75rem/1.5 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted) }
+  .meter-line b { color: var(--silk); font-weight: 500 }
+  .bar { position: relative; height: 4px; margin-top: .5rem; background: #1d2321; overflow: hidden }
+  .bar > span { display: block; height: 100%; background: var(--gold); transform: scaleX(0); transform-origin: left center; transition: transform .2s linear }
+
+  .alert { margin: .7rem 0 0; padding: .7rem .8rem; font-size: .875rem; line-height: 1.5; color: var(--silk); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent) }
+  .alert b { color: var(--warn); font-weight: 600 }
+
+  /* Console: the loader's own log, then the device's boot log, one stream. */
+  .console { border: 1px solid var(--edge); border-top: 0; background: var(--panel) }
+  .console-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; padding: .55rem .5rem .55rem .9rem; border-bottom: 1px solid var(--edge) }
+  .console-head .step-num { padding: 0; width: 1.5rem; text-align: left }
+  .console-head h3 { margin: 0; font: 500 .6875rem/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted) }
+  .tools { display: flex; flex-wrap: wrap; gap: .4rem; margin-left: auto }
+  .log {
+    height: min(20rem, 42vh);
+    overflow-y: auto;
+    padding: .5rem .9rem .7rem;
+    font: .78125rem/1.55 var(--mono);
+    color: var(--silk);
+    overflow-wrap: anywhere;
+    scrollbar-color: var(--edge) transparent;
+  }
+  .line { white-space: pre-wrap }
+  .line.tail { color: var(--muted) }
+
+  .cli { border: 1px solid var(--edge); background: var(--panel) }
+  .cli-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .5rem .5rem .5rem .9rem; border-bottom: 1px solid var(--edge) }
+  pre { margin: 0; padding: .9rem; overflow-x: auto; white-space: pre-wrap; font: .8125rem/1.75 var(--mono); font-variant-numeric: tabular-nums }
+  .hint { margin: .85rem 0 0; font-size: .875rem; line-height: 1.55; color: var(--muted) }
+  summary { cursor: pointer; font: 500 .6875rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding: .6rem 0 }
+  summary:hover { color: var(--gold) }
+  details[open] summary { padding-bottom: .2rem }
+
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--edge); font-size: .875rem; line-height: 1.6; color: var(--muted) }
+  a { color: var(--gold); text-decoration-color: color-mix(in srgb, var(--gold) 40%, transparent); text-underline-offset: 3px }
+  a:hover { text-decoration-color: var(--gold) }
+  code { font: .875em/1 var(--mono); color: var(--silk) }
+
+  @media (prefers-reduced-motion: reduce) {
+    .led { animation: none !important }
+    button, .bar > span { transition: none }
+    button:active:not(:disabled) { transform: none }
+  }
 </style>
 </head>
 <body>
-<h1>xiaozhi-4g dual</h1>
-<p>LCKFB SZPI ESP32-S3 with an ML307 module. Writes the full image at <code>0x0</code>,
-  build <code id="version">...</code>.</p>
-<esp-web-install-button manifest="manifest.json"></esp-web-install-button>
-<ul>
-  <li>Needs Chrome or Edge on desktop. Safari and Firefox cannot flash over USB.</li>
-  <li>Tick <strong>Erase device</strong> in the dialog: it clears NVS, so WiFi credentials,
-      the activation code and the selected network type are reset.</li>
-  <li>If no port shows up, hold BOOT, plug the cable in, then release BOOT.</li>
-  <li>To read the serial log, connect and choose <strong>Logs &amp; Console</strong>.</li>
-</ul>
-<footer>Older images and the ZIP: <a href="https://github.com/xlsdg/xiaozhi-4g/releases">releases</a>.</footer>
-<script>
-  fetch("manifest.json").then((r) => r.json())
-    .then((m) => { document.getElementById("version").textContent = m.version; })
-    .catch(() => { document.getElementById("version").textContent = "unavailable"; });
+<div class="wrap">
+
+  <header class="head">
+    <div>
+      <p class="k">ESP32-S3 &middot; ML307 &middot; wifi / 4G dual network</p>
+      <h1>xiaozhi-4g dual</h1>
+    </div>
+    <p class="status"><span class="led" data-state="checking" aria-hidden="true"></span><span id="status">Checking USB support</span></p>
+  </header>
+
+  <p class="lede">LCKFB SZPI ESP32-S3 (立创·实战派) with an ML307 4G module. One USB cable writes the whole
+    image, bootloader and assets included. No toolchain.</p>
+
+  <dl class="readout">
+    <div><dt class="k">Build</dt><dd id="build">…</dd></div>
+    <div><dt class="k">Target</dt><dd id="target">…</dd></div>
+    <div><dt class="k">Write at</dt><dd id="offset">…</dd></div>
+    <div><dt class="k">Image</dt><dd id="size">…</dd></div>
+  </dl>
+
+  <h2 class="k">Flash over usb</h2>
+
+  <ol class="rail">
+    <li id="step-connect" data-phase="active">
+      <div class="step-num">01</div>
+      <div class="step-body">
+        <div class="step-title">
+          <h3>Connect the board</h3>
+          <span class="badge" id="badge-connect">waiting</span>
+        </div>
+        <div class="row">
+          <button id="connect" type="button">Connect device</button>
+          <label class="check"><input id="fast" type="checkbox">Faster write (460800 baud)</label>
+        </div>
+        <p class="note" id="connect-note">Plug the board into USB with a data cable, then pick its port in the dialog.
+          Keep 115200 unless the wait is too long.</p>
+      </div>
+    </li>
+
+    <li id="step-write" data-phase="idle">
+      <div class="step-num">02</div>
+      <div class="step-body">
+        <div class="step-title">
+          <h3>Write the image</h3>
+          <span class="badge" id="badge-write">waiting for the board</span>
+        </div>
+        <div class="row">
+          <button id="flash" type="button" disabled>Flash firmware</button>
+          <label class="check"><input id="erase" type="checkbox" checked disabled>Erase device first</label>
+        </div>
+        <p class="note">Erasing wipes NVS, so WiFi credentials, the activation code and the selected network
+          type are reset. The board asks you to configure WiFi again after the flash.</p>
+        <div class="meter">
+          <p class="meter-line" id="meter" hidden><b id="meter-pct">0%</b><span id="meter-bytes"></span><span id="meter-rate"></span><span id="meter-eta"></span></p>
+          <div class="bar" id="bar" role="progressbar" aria-label="Write progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><span id="bar-fill"></span></div>
+        </div>
+        <p class="alert" id="alert" hidden></p>
+      </div>
+    </li>
+  </ol>
+
+  <div class="console">
+    <div class="console-head">
+      <span class="step-num">03</span>
+      <h3>Watch it boot</h3>
+      <div class="tools">
+        <button class="ghost" id="reset" type="button" disabled>Reset device</button>
+        <button class="ghost" id="disconnect" type="button" disabled>Disconnect</button>
+        <button class="ghost" id="copy" type="button">Copy log</button>
+        <button class="ghost" id="clear" type="button">Clear</button>
+      </div>
+    </div>
+    <div class="log" id="log" role="log" aria-label="Flash and serial log"></div>
+  </div>
+  <p class="hint">The console shows the flasher's own output first, then the device's serial log from the reboot.
+    If the board stays quiet, press <strong>Reset device</strong>.</p>
+
+  <h2 class="k">If the browser route fails</h2>
+  <div class="cli">
+    <div class="cli-head">
+      <span class="k">esptool.py</span>
+      <button class="ghost" id="copy-cli" type="button">Copy</button>
+    </div>
+    <pre id="cli">esptool.py -p PORT -b 460800 erase_flash
+esptool.py -p PORT -b 460800 write_flash 0x0 merged-binary.bin</pre>
+  </div>
+  <details>
+    <summary>Command line notes</summary>
+    <p class="hint"><code>PORT</code> is the serial device, for example <code>/dev/ttyUSB0</code> on Linux or
+      <code>/dev/cu.usbserial-0001</code> on macOS. <code>merged-binary.bin</code> and the ZIP are attached to the
+      <a href="https://github.com/xlsdg/xiaozhi-4g/releases">latest release</a>; this page only ships the newest build.
+      On a board that will not boot, hold BOOT, plug the cable in, then release BOOT.</p>
+  </details>
+
+  <footer>Firmware is MIT, and includes code from
+    <a href="https://github.com/78/xiaozhi-esp32">78/xiaozhi-esp32</a>. Source and docs:
+    <a href="https://github.com/xlsdg/xiaozhi-4g">xlsdg/xiaozhi-4g</a>.</footer>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const LOG_MAX = 1500;
+
+const logEl = $("log");
+const lines = [];
+const tail = document.createElement("div");
+tail.className = "line tail";
+logEl.append(tail);
+let pending = "";
+let follow = true;
+
+function addLine(text) {
+  lines.push(text);
+  const node = document.createElement("div");
+  node.className = "line";
+  node.textContent = text || "\u00a0";
+  logEl.insertBefore(node, tail);
+  while (lines.length > LOG_MAX) {
+    lines.shift();
+    const first = logEl.firstElementChild;
+    if (first && first !== tail) first.remove();
+  }
+}
+
+function setTail(text) {
+  if (pending === text) return;
+  pending = text;
+  tail.textContent = text;
+  if (follow) logEl.scrollTop = logEl.scrollHeight;
+}
+
+// One stream for both sources: the loader's own messages, then the device's serial output.
+function write(text) {
+  follow = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 24;
+  const clean = String(text).replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\r/g, "");
+  const parts = (pending + clean).split("\n");
+  pending = parts.pop();
+  parts.forEach(addLine);
+  setTail(pending);
+  if (follow) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function clearLog() {
+  lines.length = 0;
+  logEl.replaceChildren(tail);
+  pending = "";
+  tail.textContent = "";
+}
+
+// ---------------------------------------------------------------- page state
+
+const state = {
+  port: null, transport: null, loader: null, chip: null,
+  image: null, offset: 0, size: 0, monitor: null,
+  phase: "idle", target: null, mismatch: false, canFlash: false,
+};
+
+let ESPLoader, Transport, HardReset;
+
+function setStatus(text, led) {
+  $("status").textContent = text;
+  document.querySelector(".led").dataset.state = led;
+}
+
+function badge(id, text, kind) {
+  const el = $(id);
+  el.textContent = text;
+  el.dataset.kind = kind || "";
+}
+
+function setPhase(phase) {
+  state.phase = phase;
+  const connected = Boolean(state.chip);
+  const busyWork = phase === "connecting" || phase === "writing";
+  $("connect").disabled = busyWork || !state.canFlash;
+  $("connect").textContent = connected ? "Change device" : "Connect device";
+  $("fast").disabled = busyWork;
+  $("erase").disabled = !connected || phase === "writing";
+  $("flash").disabled = !connected || !state.image || phase === "writing" || Boolean(state.mismatch);
+  $("reset").disabled = !connected || phase === "writing";
+  $("disconnect").disabled = !connected || phase === "writing";
+  $("step-connect").dataset.phase =
+    phase === "connecting" ? "active" : connected ? (state.mismatch ? "failed" : "done") : "active";
+  $("step-write").dataset.phase =
+    phase === "writing" ? "active" : phase === "ready" ? "active" : "idle";
+}
+
+function alertBox(message, lead) {
+  const el = $("alert");
+  if (!message) { el.hidden = true; el.textContent = ""; return; }
+  el.hidden = false;
+  el.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = (lead === undefined ? "Stopped" : lead) + " ";
+  el.append(b, document.createTextNode(message));
+}
+
+function fail(err, where) {
+  const msg = (err && err.message) || String(err);
+  write("\n! " + msg + "\n");
+  let hint = "Unplug the board, plug it back in, and try again.";
+  if (/connect|sync|timeout|timed out/i.test(msg)) hint = "Hold BOOT, plug the cable in, then release BOOT, and connect again.";
+  else if (/write|checksum|md5|flash/i.test(msg)) hint = "Untick the fast option, use another USB cable, then flash again.";
+  alertBox(msg + " " + hint);
+  const stage = where === "write" ? "#badge-write" : "#badge-connect";
+  badge(stage, where === "write" ? "failed" : "no answer", "bad");
+  $(where === "write" ? "#step-write" : "#step-connect").dataset.phase = "failed";
+  setStatus("Stopped, see the console", "off");
+  state.phase = "error";
+  const connected = Boolean(state.chip);
+  $("connect").disabled = !state.canFlash;
+  $("flash").disabled = !connected;
+  $("reset").disabled = !connected;
+  $("disconnect").disabled = !connected;
+}
+
+// ---------------------------------------------------------------- manifest
+
+let manifest = null;
+
+fetch("manifest.json").then((r) => r.json()).then((m) => {
+  manifest = m;
+  $("build").textContent = m.version || "unknown";
+  const build = m.builds && m.builds[0];
+  if (!build) return;
+  state.target = build.chipFamily || null;
+  $("target").textContent = state.target || "unknown";
+  const part = build.parts && build.parts[0];
+  if (!part) return;
+  state.offset = Number(part.offset) || 0;
+  $("offset").textContent = "0x" + state.offset.toString(16);
+  fetch(part.path, { method: "HEAD" }).then((r) => {
+    const len = Number(r.headers.get("content-length"));
+    if (len) {
+      state.size = len;
+      $("size").textContent = (len / 1048576).toFixed(1) + " MB";
+      setPhase(state.phase);
+    }
+  }).catch(() => {});
+}).catch(() => {
+  ["build", "target", "offset", "size"].forEach((id) => { $(id).textContent = "unavailable"; });
+  write("manifest.json could not be read, so this page does not know what to write.\n");
+});
+
+let imagePromise = null;
+
+function preload() {
+  if (!imagePromise) {
+    imagePromise = loadImage().catch((err) => { imagePromise = null; throw err; });
+  }
+  return imagePromise;
+}
+
+async function loadImage() {
+  const part = manifest.builds[0].parts[0];
+  write("Downloading " + part.path + "…\n");
+  const resp = await fetch(part.path);
+  if (!resp.ok) throw new Error("Downloading " + part.path + " failed: " + resp.status);
+  state.image = new Uint8Array(await resp.arrayBuffer());
+  state.size = state.image.length;
+  $("size").textContent = (state.size / 1048576).toFixed(1) + " MB";
+  write("Image ready, " + (state.size / 1048576).toFixed(1) + " MB.\n");
+  setPhase(state.phase);
+}
+
+// ---------------------------------------------------------------- connection
+
+async function releasePort() {
+  await stopMonitor();
+  if (state.transport) {
+    try { await state.transport.disconnect(); } catch (e) { /* port already gone */ }
+    state.transport = null;
+  } else if (state.port) {
+    for (let i = 0; i < 10; i++) {
+      try { await state.port.close(); break; } catch (e) { await sleep(60); }
+    }
+  }
+}
+
+// The loader has to own the port, so a second write re-syncs with the board first.
+async function attach(port) {
+  await releasePort();
+  state.chip = null;
+  write("\nConnecting to the board…\n");
+  const transport = new Transport(port);
+  const loader = new ESPLoader({
+    transport,
+    baudrate: $("fast").checked ? 460800 : 115200,
+    romBaudrate: 115200,
+    terminal: { clean: clearLog, write, writeLine: (t) => write(t + "\n") },
+  });
+  state.transport = transport;
+  try {
+    await loader.main();
+    state.loader = loader;
+    state.chip = (loader.chip && loader.chip.CHIP_NAME) || "unknown";
+    await loader.flashId();
+  } catch (err) {
+    state.loader = null;
+    await releasePort();
+    throw err;
+  }
+}
+
+async function connect() {
+  setPhase("connecting");
+  badge("#badge-connect", "waiting for the port", "busy");
+  alertBox("");
+  let port;
+  try {
+    port = await navigator.serial.requestPort();
+  } catch (err) {
+    badge("#badge-connect", err.name === "NotFoundError" ? "no port picked" : "failed", "bad");
+    state.phase = "idle";
+    setPhase("idle");
+    setStatus("No port picked", "off");
+    return;
+  }
+
+  state.port = port;
+  setPhase("connecting");
+  try {
+    await attach(port);
+  } catch (err) {
+    fail(err, "connect");
+    return;
+  }
+
+  // Preload the image while the user is still reading the port dialog.
+  preload().catch((err) => write("\n" + err.message + "\n"));
+
+  const target = state.target;
+  state.mismatch = Boolean(target && state.chip !== target && !state.chip.startsWith(target));
+  $("connect-note").textContent = state.mismatch
+    ? "This page writes " + target + " images. The board on this port answers as " + state.chip + "."
+    : "Board answered as " + state.chip + ". Leave the cable in place for the write.";
+  $("step-connect").dataset.phase = state.mismatch ? "failed" : "done";
+  badge("#badge-connect", state.mismatch ? "wrong board" : "connected", state.mismatch ? "bad" : "ok");
+  if (state.mismatch) {
+    alertBox("The board answers as " + state.chip + ", but this image is built for " + target + ". Nothing was written.", "Wrong board.");
+    setStatus("Wrong board", "off");
+    state.phase = "error";
+  } else {
+    badge("#badge-write", "ready", "");
+    setStatus("Connected", "ready");
+    state.phase = "ready";
+  }
+  setPhase(state.phase);
+}
+
+// ---------------------------------------------------------------- write
+
+let progressAt = 0;
+
+function reportProgress(fileIndex, written, total) {
+  const now = performance.now();
+  if (now - progressAt < 120 && written < total) return;
+  progressAt = now;
+  const file = state.image ? state.image.length : total;
+  const done = Math.round((written / total) * file);
+  const pct = Math.min(100, (done / state.size) * 100);
+  const elapsed = (now - state.startedAt) / 1000;
+  const rate = done / elapsed;
+  const left = rate > 0 ? (state.size - done) / rate : 0;
+  $("meter-pct").textContent = Math.floor(pct) + "%";
+  $("meter-bytes").textContent = (done / 1048576).toFixed(1) + " / " + (state.size / 1048576).toFixed(1) + " MB";
+  $("meter-rate").textContent = rate > 1024 ? (rate / 1024).toFixed(0) + " kB/s" : rate.toFixed(0) + " B/s";
+  $("meter-eta").textContent = elapsed > 3 ? clock(left) + " left" : "estimating";
+  $("bar-fill").style.transform = "scaleX(" + (pct / 100).toFixed(4) + ")";
+  $("bar").setAttribute("aria-valuenow", String(Math.floor(pct)));
+}
+
+function clock(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+async function flash() {
+  if (state.phase === "writing") return;
+  setPhase("writing");
+  alertBox("");
+  badge("#badge-write", "working", "busy");
+  setStatus("Writing, do not unplug", "busy");
+  $("meter").hidden = false;
+  $("bar").hidden = false;
+  $("bar-fill").style.transform = "scaleX(0)";
+  reportProgressReset();
+
+  try {
+    await preload();
+    if (!state.transport) {
+      write("\nTaking the port back from the log reader.\n");
+      await attach(state.port);
+    }
+    state.startedAt = performance.now();
+    await state.loader.writeFlash({
+      fileArray: [{ data: state.image, address: state.offset }],
+      flashMode: "keep",
+      flashFreq: "keep",
+      flashSize: "keep",
+      eraseAll: $("erase").checked,
+      compress: true,
+      reportProgress,
+    });
+    reportProgress(0, state.size, state.size);
+    write("\nImage written. Hard resetting so the new firmware starts.\n");
+    await state.transport.setRTS(true);
+    await sleep(100);
+    await state.loader.after();
+  } catch (err) {
+    $("meter").hidden = true;
+    $("bar").hidden = true;
+    fail(err, "write");
+    return;
+  }
+
+  badge("#badge-write", "flashed", "ok");
+  $("step-write").dataset.phase = "done";
+  setStatus("Flashed, reading the log", "ready");
+  state.phase = "ready";
+  setPhase("ready");
+  await monitor();
+}
+
+function reportProgressReset() {
+  state.startedAt = performance.now();
+  progressAt = 0;
+  $("meter-pct").textContent = "0%";
+  $("meter-bytes").textContent = "0.0 / " + (state.size / 1048576).toFixed(1) + " MB";
+  $("meter-rate").textContent = "starting";
+  $("meter-eta").textContent = $("fast").checked ? "about 1 minute" : "about 5 minutes";
+}
+
+// ---------------------------------------------------------------- device log
+
+async function monitor() {
+  if (!state.port) return;
+  await releasePort();
+  try {
+    await state.port.open({ baudRate: 115200, bufferSize: 8192 });
+  } catch (err) {
+    write("\nCould not open the port for the log: " + err.message + "\n");
+    return;
+  }
+  const ctrl = new AbortController();
+  const reader = state.port.readable.getReader();
+  const decoder = new TextDecoder();
+  state.monitor = { ctrl, reader };
+  write("--- device log, 115200 baud ---\n");
+  try {
+    while (!ctrl.signal.aborted) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) write(decoder.decode(value, { stream: true }));
+    }
+  } catch (err) {
+    if (!ctrl.signal.aborted) write("\nLog stopped: " + err.message + "\n");
+  } finally {
+    try { reader.releaseLock(); } catch (err) { /* already released */ }
+  }
+}
+
+async function stopMonitor() {
+  const running = state.monitor;
+  if (!running) return;
+  state.monitor = null;
+  running.ctrl.abort();
+  try { await running.reader.cancel(); } catch (err) { /* reader already gone */ }
+  await sleep(50);
+}
+
+// ---------------------------------------------------------------- controls
+
+async function resetDevice() {
+  if (!state.port) return;
+  write("Resetting the board…\n");
+  try {
+    if (state.transport) {
+      await state.loader.after();
+    } else {
+      const transport = new Transport(state.port);
+      await transport.setRTS(true);
+      await sleep(100);
+      await new HardReset(transport).reset();
+    }
+  } catch (err) {
+    write("Reset failed: " + err.message + "\n");
+  }
+}
+
+async function disconnect() {
+  await releasePort();
+  state.port = null;
+  state.chip = null;
+  state.loader = null;
+  state.monitor = null;
+  $("connect-note").textContent = "Disconnected. The port is free for esptool or another tool.";
+  badge("#badge-connect", "waiting", "");
+  badge("#badge-write", "waiting for the board", "");
+  $("step-connect").dataset.phase = "active";
+  $("step-write").dataset.phase = "idle";
+  setStatus("Disconnected", "off");
+  state.phase = "idle";
+  setPhase("idle");
+}
+
+$("connect").addEventListener("click", connect);
+$("flash").addEventListener("click", flash);
+$("reset").addEventListener("click", resetDevice);
+$("disconnect").addEventListener("click", disconnect);
+$("clear").addEventListener("click", clearLog);
+
+function copyButton(id, text) {
+  const button = $(id);
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text());
+      button.textContent = "Copied";
+    } catch (err) {
+      button.textContent = "Copy failed";
+    }
+    setTimeout(() => { button.textContent = id === "copy" ? "Copy log" : "Copy"; }, 1600);
+  });
+}
+copyButton("copy", () => lines.concat(pending).join("\n"));
+copyButton("copy-cli", () => $("cli").textContent);
+
+// ---------------------------------------------------------------- boot
+
+const WebSerial = "serial" in navigator && window.isSecureContext;
+const lib = await import("https://unpkg.com/esptool-js@0.7.0/bundle.js").catch(() => null);
+({ ESPLoader, Transport, HardReset } = lib || {});
+state.canFlash = WebSerial && Boolean(ESPLoader);
+setPhase("idle");
+
+if (state.canFlash) {
+  setStatus("USB serial ready", "ready");
+  write("Ready. Connect the board to start.\n");
+} else if (!("serial" in navigator)) {
+  setStatus("No Web Serial, use Chrome or Edge", "off");
+  $("connect-note").textContent = "This browser cannot reach USB serial. Use Chrome or Edge on a desktop, or the esptool commands below.";
+  alertBox("This browser has no Web Serial API. Use Chrome or Edge on a desktop, or the esptool commands below.", "Cannot flash here.");
+} else if (!window.isSecureContext) {
+  setStatus("Blocked outside HTTPS or localhost", "off");
+  $("connect-note").textContent = "The browser blocks USB serial outside HTTPS or localhost. Serve this page over HTTPS, or use the esptool commands below.";
+  alertBox("This page is not on HTTPS or localhost, so the browser blocks USB serial. Use the esptool commands below.", "Cannot flash here.");
+} else {
+  setStatus("Flasher library did not load", "off");
+  alertBox("The flasher library could not be loaded from unpkg, so the browser route is unavailable. Use the esptool commands below.", "Cannot flash here.");
+  write("Could not load esptool-js from unpkg.com. Check the network, or use the command line below.\n");
+}
+
+// Open the page with ?selftest to check the console framing and the clock maths.
+if (new URLSearchParams(location.search).has("selftest")) {
+  const checks = [];
+  const ok = (name, pass) => checks.push((pass ? "ok   " : "FAIL ") + name);
+  clearLog();
+  write("a\nb\nc");
+  ok("splits complete lines", lines.join("|") === "a|b");
+  ok("keeps the partial line", pending === "c");
+  write("d\r\ne");
+  ok("completes the partial line", lines.join("|") === "a|b|cd");
+  ok("clock pads seconds", clock(65) === "1:05" && clock(0) === "0:00" && clock(599.6) === "10:00");
+  clearLog();
+  write("\x1b[0;32mI (123) boot\x1b[0m\n");
+  ok("strips ansi colour", lines[0] === "I (123) boot");
+  clearLog();
+  for (let i = 0; i < LOG_MAX + 50; i++) addLine("x");
+  ok("caps the log", lines.length === LOG_MAX && logEl.children.length === LOG_MAX + 1);
+  clearLog();
+  write(checks.join("\n") + "\n\n" + (checks.some((c) => c.startsWith("FAIL")) ? "SELF-TEST FAILED" : "SELF-TEST PASSED") + "\n");
+}
 </script>
 </body>
 </html>

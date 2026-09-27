@@ -47,10 +47,11 @@ at offset `0x0`.
 Or from a browser, no toolchain needed (Chrome or Edge on desktop; Safari and Firefox cannot
 flash over USB): <https://xlsdg.org/xiaozhi-4g/>. The page is served by GitHub Pages together with
 the latest build's `merged-binary.bin` (release downloads redirect without CORS headers, so the
-browser cannot fetch them directly) and writes it at `0x0`, with an **Erase device** option. Its
-**Logs & Console** entry shows the serial log. It is the quickest fix for a board that no longer
-boots. Older builds are only on [Releases](https://github.com/xlsdg/xiaozhi-4g/releases), and only
-the 3 newest are kept; flash those with esptool.
+browser cannot fetch them directly) and writes it at `0x0`, with an **Erase device** option. It runs
+the whole flow in place (connect, write, then the serial log of the reboot) instead of opening a
+dialog, so the log stays visible while the image is written. It is the quickest fix for a board that
+no longer boots. Older builds are only on [Releases](https://github.com/xlsdg/xiaozhi-4g/releases),
+and only the 3 newest are kept; flash those with esptool.
 
 ## Button gestures (BOOT)
 
@@ -90,7 +91,7 @@ the default branch), on manual dispatch, and when the workflow file itself chang
 6. Publishes a release tagged `<upstream tag>-4g.<short sha>` on that commit with
    `merged-binary.bin` and the zip, then prunes everything except the 3 newest `-4g.` releases.
    Release tags keep the commits of earlier rebases alive.
-7. Deploys `pages/index.html`, `merged-binary.bin` and a generated esp-web-tools `manifest.json`
+7. Deploys `pages/index.html`, `merged-binary.bin` and a generated `manifest.json`
    to GitHub Pages (Settings > Pages > Source: GitHub Actions).
 
 Changing only `pages/index.html` does not create a new build, so redeploy it with
