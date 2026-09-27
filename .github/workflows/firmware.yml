@@ -1,0 +1,188 @@
+name: Build 4G dual firmware
+
+on:
+  schedule:
+    - cron: "0 20 * * *" # 04:00 Asia/Shanghai
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/firmware.yml
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if this commit already has a release
+        type: boolean
+        default: false
+
+concurrency:
+  group: dual-firmware
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Checkout port branch
+        uses: actions/checkout@v7
+        with:
+          ref: dual
+          fetch-depth: 0
+
+      # dual = newest upstream tag + the port commit(s). Rebase keeps the port a
+      # clean delta on top of upstream instead of interleaving merge history.
+      - name: Rebase port onto latest upstream tag
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/78/xiaozhi-esp32.git 2>/dev/null ||
+            git remote set-url upstream https://github.com/78/xiaozhi-esp32.git
+          # Release tags only (vX.Y.Z, optionally _N); pre-releases like v2.6.0-beta are ignored.
+          UP_TAG=$(git ls-remote --tags --refs --sort=-version:refname upstream 'v*' |
+            awk -F/ '{print $NF}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(_[0-9]+)?$' |
+            awk 'NR==1{tag=$0} END{print tag}')
+          test -n "$UP_TAG"
+          echo "upstream_tag=$UP_TAG" >> "$GITHUB_OUTPUT"
+          echo "orig_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git fetch --no-tags --no-recurse-submodules upstream "refs/tags/$UP_TAG:refs/tags/$UP_TAG"
+          if ! git merge-base --is-ancestor "$UP_TAG" HEAD; then
+            if ! git rebase "$UP_TAG"; then
+              echo "::error::rebase conflict with $UP_TAG, rebase the dual branch by hand"
+              git diff --name-only --diff-filter=U
+              git rebase --abort
+              exit 1
+            fi
+          fi
+          echo "release_tag=${UP_TAG}-4g.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing release
+        id: check
+        uses: actions/github-script@v9
+        env:
+          REL_TAG: ${{ steps.sync.outputs.release_tag }}
+        with:
+          script: |
+            const force = context.eventName === 'workflow_dispatch' &&
+              context.payload.inputs.force === 'true';
+            let exists = false;
+            try {
+              await github.rest.repos.getReleaseByTag({...context.repo, tag: process.env.REL_TAG});
+              exists = true;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('skip', String(exists && !force));
+
+      - name: Build firmware
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$IDF_PATH/export.sh"
+          python scripts/build.py lckfb/szpi-esp32s3 --name lichuang-dev-dual --language zh-CN --zip
+
+      - name: Persist rebased port
+        if: steps.check.outputs.skip != 'true'
+        run: git push --force-with-lease=dual:${{ steps.sync.outputs.orig_sha }} origin HEAD:dual
+
+      - name: Publish release
+        if: steps.check.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.sync.outputs.release_tag }}
+          target_commitish: ${{ steps.sync.outputs.sha }}
+          name: xiaozhi-4g dual ${{ steps.sync.outputs.upstream_tag }}
+          body: |
+            lckfb SZPI ESP32-S3 (立创·实战派) + ML307 4G module, WiFi/4G switchable.
+            Firmware reports itself as `lichuang-dev-dual`, so the official OTA server never replaces it.
+            Updates are manual over USB only.
+
+            Upstream: `${{ steps.sync.outputs.upstream_tag }}`
+
+            Flash from the browser: https://xlsdg.org/xiaozhi-4g/ (Chrome/Edge), or:
+            ```
+            esptool.py -p PORT -b 460800 erase_flash
+            esptool.py -p PORT -b 460800 write_flash 0x0 merged-binary.bin
+            ```
+            erase_flash wipes NVS: WiFi credentials and the network type are reset.
+            See README.md on the main branch.
+          files: |
+            build/merged-binary.bin
+            releases/*.zip
+
+      - name: Checkout flasher page
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          path: main-src
+          sparse-checkout: pages
+
+      # The binary is served from the same origin as the page: release downloads
+      # redirect without CORS headers, so the browser cannot fetch them.
+      - name: Stage flasher site
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          REL_TAG: ${{ steps.sync.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir site
+          cp main-src/pages/index.html build/merged-binary.bin site/
+          cat > site/manifest.json <<EOF
+          {
+            "name": "xiaozhi-4g dual (LCKFB SZPI ESP32-S3 + ML307)",
+            "version": "$REL_TAG",
+            "new_install_prompt_erase": true,
+            "builds": [{
+              "chipFamily": "ESP32-S3",
+              "improv": false,
+              "parts": [{ "path": "merged-binary.bin", "offset": 0 }]
+            }]
+          }
+          EOF
+
+      - name: Upload flasher site
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - name: Prune old releases
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/github-script@v9
+        env:
+          REL_TAG: ${{ steps.sync.outputs.release_tag }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const releases = await github.paginate(github.rest.repos.listReleases,
+              {owner, repo, per_page: 100});
+            const ours = releases.filter(r => r.tag_name.includes('-4g.') && r.tag_name !== process.env.REL_TAG);
+            for (const release of ours.slice(2)) {
+              await github.rest.repos.deleteRelease({owner, repo, release_id: release.id});
+              await github.rest.git.deleteRef({owner, repo, ref: `tags/${release.tag_name}`}).catch(() => {});
+            }
+
+  pages:
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
