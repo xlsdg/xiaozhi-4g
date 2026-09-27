@@ -469,6 +469,11 @@ function portHint(err) {
   return "Another program may be holding the port.";
 }
 
+// The board usually answers with detail. ESP32-S31 exists, so a bare prefix is not enough.
+function chipMatches(chip, target) {
+  return chip === target || chip.startsWith(target + " ");
+}
+
 async function connect() {
   setPhase("connecting");
   badge("#badge-connect", "waiting for the port", "busy");
@@ -480,6 +485,13 @@ async function connect() {
   } catch (err) {
     const hint = portHint(err);
     write("! " + (err.message || err.name) + "\n" + hint + "\n");
+    // A cancelled pick leaves the device already open on the port it used before.
+    if (state.chip) {
+      $("connect-note").textContent = "Still connected as " + state.chip + ". The port dialog was closed.";
+      state.phase = "ready";
+      setPhase("ready");
+      return;
+    }
     $("connect-note").textContent = hint;
     badge("#badge-connect", err.name === "NotFoundError" ? "no port picked" : "no port", "bad");
     setStatus(err.name === "SecurityError" ? "Serial access blocked" : "No port picked", "off");
@@ -488,6 +500,8 @@ async function connect() {
     return;
   }
 
+  // Release under the old port, or the new one gets closed before it ever opened.
+  await releasePort();
   state.port = port;
   setPhase("connecting");
   try {
@@ -501,7 +515,7 @@ async function connect() {
   preload().catch((err) => write("\n" + err.message + "\n"));
 
   const target = state.target;
-  state.mismatch = Boolean(target && state.chip !== target && !state.chip.startsWith(target));
+  state.mismatch = Boolean(target && !chipMatches(state.chip, target));
   $("connect-note").textContent = state.mismatch
     ? "This page writes " + target + " images. The board on this port answers as " + state.chip + "."
     : "Board answered as " + state.chip + ". Leave the cable in place for the write.";
@@ -739,6 +753,9 @@ if (new URLSearchParams(location.search).has("selftest")) {
   for (let i = 0; i < LOG_MAX + 50; i++) addLine("x");
   ok("caps the log", lines.length === LOG_MAX && logEl.children.length === LOG_MAX + 1);
   clearLog();
+  ok("matches a chip label, not a longer name", chipMatches("ESP32-S3", "ESP32-S3") &&
+    chipMatches("ESP32-S3 (QFN56) (revision v0.2)", "ESP32-S3") &&
+    !chipMatches("ESP32-S31", "ESP32-S3") && !chipMatches("ESP32-S2", "ESP32-S3"));
   const ids = ("status connect fast erase flash reset disconnect clear copy copy-cli cli log meter bar bar-fill " +
     "meter-pct meter-bytes meter-rate meter-eta alert build target offset size connect-note " +
     "badge-connect badge-write step-connect step-write").split(" ");
