@@ -1,4 +1,4 @@
-#include "wifi_board.h"
+#include "dual_network_board.h"
 #include "codecs/box_audio_codec.h"
 #include "display/lcd_display.h"
 #include "display/emote_display.h"
@@ -59,7 +59,7 @@ public:
     }
 };
 
-class LichuangDevBoard : public WifiBoard {
+class LichuangDevBoard : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
@@ -100,6 +100,14 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
+    // WiFi configuration mode only exists on the inner WifiBoard. This keeps the
+    // existing call sites below compiling and is a no-op while running on 4G.
+    void EnterWifiConfigMode() {
+        if (GetNetworkType() == NetworkType::WIFI) {
+            static_cast<WifiBoard&>(GetCurrentBoard()).EnterWifiConfigMode();
+        }
+    }
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -113,6 +121,16 @@ private:
                 app.ToggleChatState();
             }
         });
+
+        // 4 clicks switch between WiFi and 4G (persisted, reboots). Double click is
+        // AEC and long press is press-to-talk on this board, so both are taken.
+        boot_button_.OnMultipleClick([this]() {
+            auto state = Application::GetInstance().GetDeviceState();
+            if (state == kDeviceStateStarting || state == kDeviceStateIdle ||
+                state == kDeviceStateWifiConfiguring) {
+                SwitchNetworkType();
+            }
+        }, 4);
 
         boot_button_.OnPressDown([this]() {
             if (press_to_talk_tool_ && press_to_talk_tool_->IsPressToTalkEnabled()) {
@@ -280,7 +298,11 @@ private:
     }
 
 public:
-    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    // ML307 4G module on the bottom-left 5P expansion header:
+    //   5V 3V3 GND IO10 IO11  <->  5V EN GND TXD RXD
+    LichuangDevBoard()
+        : DualNetworkBoard(GPIO_NUM_11, GPIO_NUM_10, GPIO_NUM_NC, 0),  // 0: start on WiFi
+          boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeSpi();
         InitializeSt7789Display();
