@@ -251,7 +251,7 @@ esptool.py -p PORT -b 460800 write_flash 0x0 merged-binary.bin</pre>
 </div>
 
 <script type="module">
-const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id.startsWith("#") ? id.slice(1) : id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LOG_MAX = 1500;
 
@@ -459,18 +459,32 @@ async function attach(port) {
   }
 }
 
+function portHint(err) {
+  if (err.name === "SecurityError") {
+    return "Chrome has Serial access blocked for this site, so no dialog opens. Open the icon in front of the address, allow Serial, then click Connect again.";
+  }
+  if (err.name === "NotFoundError") {
+    return "No port was picked. Chrome only lists the devices the system already sees: plug the board in with a data cable, close any serial monitor holding the port, and check ls /dev/cu.* on macOS.";
+  }
+  return "Another program may be holding the port.";
+}
+
 async function connect() {
   setPhase("connecting");
   badge("#badge-connect", "waiting for the port", "busy");
   alertBox("");
+  write("\nPick the board's port in the dialog.\n");
   let port;
   try {
     port = await navigator.serial.requestPort();
   } catch (err) {
-    badge("#badge-connect", err.name === "NotFoundError" ? "no port picked" : "failed", "bad");
+    const hint = portHint(err);
+    write("! " + (err.message || err.name) + "\n" + hint + "\n");
+    $("connect-note").textContent = hint;
+    badge("#badge-connect", err.name === "NotFoundError" ? "no port picked" : "no port", "bad");
+    setStatus(err.name === "SecurityError" ? "Serial access blocked" : "No port picked", "off");
     state.phase = "idle";
     setPhase("idle");
-    setStatus("No port picked", "off");
     return;
   }
 
@@ -725,6 +739,27 @@ if (new URLSearchParams(location.search).has("selftest")) {
   for (let i = 0; i < LOG_MAX + 50; i++) addLine("x");
   ok("caps the log", lines.length === LOG_MAX && logEl.children.length === LOG_MAX + 1);
   clearLog();
+  const ids = ("status connect fast erase flash reset disconnect clear copy copy-cli cli log meter bar bar-fill " +
+    "meter-pct meter-bytes meter-rate meter-eta alert build target offset size connect-note " +
+    "badge-connect badge-write step-connect step-write").split(" ");
+  const missing = ids.filter((i) => !$("#" + i));
+  ok("every element exists" + (missing.length ? ": " + missing.join(",") : ""), missing.length === 0);
+  try {
+    ["idle", "connecting", "writing", "ready", "error"].forEach(setPhase);
+    alertBox("probe");
+    alertBox("");
+    fail(new Error("selftest probe"), "write");
+    badge("#badge-connect", "probe", "ok");
+    ok("state helpers take a #-id", $("badge-connect").dataset.kind === "ok");
+  } catch (err) {
+    ok("state helpers run over every phase: " + err.message, false);
+  }
+  clearLog();
+  alertBox("");
+  state.phase = "idle";
+  setPhase("idle");
+  badge("#badge-connect", "waiting", "");
+  badge("#badge-write", "waiting for the board", "");
   write(checks.join("\n") + "\n\n" + (checks.some((c) => c.startsWith("FAIL")) ? "SELF-TEST FAILED" : "SELF-TEST PASSED") + "\n");
 }
 </script>
