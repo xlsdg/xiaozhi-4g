@@ -52,22 +52,31 @@ jobs:
             awk -F/ '{print $NF}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(_[0-9]+)?$' |
             awk 'NR==1{tag=$0} END{print tag}')
           test -n "$UP_TAG"
-          ORIG_SHA=$(git rev-parse HEAD)
           echo "upstream_tag=$UP_TAG" >> "$GITHUB_OUTPUT"
-          echo "orig_sha=$ORIG_SHA" >> "$GITHUB_OUTPUT"
+          echo "orig_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git fetch --no-tags --no-recurse-submodules upstream "refs/tags/$UP_TAG:refs/tags/$UP_TAG"
           if ! git merge-base --is-ancestor "$UP_TAG" HEAD; then
             if ! git rebase "$UP_TAG"; then
-              echo "::error::rebase conflict with $UP_TAG, rebase the dual branch by hand"
-              git diff --name-only --diff-filter=U
-              git rebase --abort
-              exit 1
+              # GITHUB_TOKEN cannot write .github/workflows, so the build branch
+              # drops upstream's CI. Replaying that deletion over an upstream
+              # workflow edit is a modify/delete conflict, not a real one.
+              CONFLICTS=$(git diff --name-only --diff-filter=U)
+              if [ -n "$CONFLICTS" ] && [ -z "$(echo "$CONFLICTS" | grep -v '^\.github/workflows/')" ]; then
+                git rm -r -q --ignore-unmatch .github/workflows
+                git -c core.editor=true rebase --continue || {
+                  git rebase --abort
+                  echo "::error::rebase conflict with $UP_TAG, rebase the dual branch by hand"
+                  exit 1
+                }
+              else
+                echo "::error::rebase conflict with $UP_TAG, rebase the dual branch by hand"
+                echo "$CONFLICTS"
+                git rebase --abort
+                exit 1
+              fi
             fi
           fi
-          # The push token cannot write .github/workflows, so keep the files the
-          # remote branch already carries. Upstream's CI is irrelevant on a fork.
-          git rm -r --cached --ignore-unmatch .github/workflows >/dev/null 2>&1 || true
-          git checkout "$ORIG_SHA" -- .github/workflows 2>/dev/null || true
+          git rm -r -q --ignore-unmatch .github/workflows
           git diff --cached --quiet || git commit --amend --no-edit
           echo "release_tag=${UP_TAG}-4g.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
