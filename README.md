@@ -17,7 +17,7 @@ networking is upstream [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) c
 | Branch | Content |
 |---|---|
 | `main` (default) | `.github/workflows/firmware.yml`, `pages/`, this README. No upstream code. |
-| `dual` | The newest upstream release tag plus the port commit on top (2 files). |
+| `dual` | The newest upstream release tag plus the port commit on top (the 2 board files; `.github/workflows/` is deleted). |
 
 Your whole firmware change is always `git show origin/dual` (or `git log <tag>..origin/dual`
 if it ever grows beyond one commit). Nothing on `main` ever conflicts with upstream.
@@ -81,8 +81,9 @@ the default branch), on manual dispatch, and when the workflow file itself chang
 
 1. Resolves the newest upstream release tag (`vX.Y.Z`, optionally `_N`; pre-release tags are
    ignored) and checks out `dual`.
-2. If `dual` is not based on that tag yet, rebases it onto the tag. A conflict fails the run with
-   the conflicting files listed.
+2. If `dual` is not based on that tag yet, rebases it onto the tag. Conflicts under
+   `.github/workflows/` are auto-resolved by deleting that directory; any other conflict fails
+   the run with the conflicting files listed.
 3. Skips everything when a release for the resulting commit already exists (unless `force`).
 4. Builds in `espressif/idf:v6.1` with upstream's own tool:
    `python scripts/build.py lckfb/szpi-esp32s3 --name lichuang-dev-dual --language zh-CN --zip`
@@ -100,9 +101,9 @@ Changing only `pages/index.html` does not create a new build, so redeploy it wit
 A push to `dual` does not trigger a build (the workflow file is not on that branch). After changing
 the port by hand, run `gh workflow run firmware.yml`.
 
-Upstream's own workflows exist only on `dual`, where they never run on schedule; `Build Boards` is
-additionally disabled. If a future upstream release adds a push-triggered workflow, disable it with
-`gh workflow disable <name>`.
+`dual` carries no workflow files at all: the sync deletes `.github/workflows/` before pushing,
+because `GITHUB_TOKEN` cannot write workflow files. Upstream's CI therefore never runs here and
+nothing ever needs disabling.
 
 When a rebase conflicts:
 
@@ -110,6 +111,8 @@ When a rebase conflicts:
 git fetch origin dual && git switch dual && git reset --hard origin/dual
 git fetch --no-tags https://github.com/78/xiaozhi-esp32.git "refs/tags/<tag>:refs/tags/<tag>"
 git rebase <tag>            # resolve, check the 5 invariants below, git rebase --continue
+git rm -r --ignore-unmatch .github/workflows  # keep dual workflow-free, like the CI sync
+git diff --cached --quiet || git commit --amend --no-edit
 git push --force-with-lease origin dual
 gh workflow run firmware.yml
 ```
