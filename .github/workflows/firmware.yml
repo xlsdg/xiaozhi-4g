@@ -52,8 +52,9 @@ jobs:
             awk -F/ '{print $NF}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(_[0-9]+)?$' |
             awk 'NR==1{tag=$0} END{print tag}')
           test -n "$UP_TAG"
+          ORIG_SHA=$(git rev-parse HEAD)
           echo "upstream_tag=$UP_TAG" >> "$GITHUB_OUTPUT"
-          echo "orig_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "orig_sha=$ORIG_SHA" >> "$GITHUB_OUTPUT"
           git fetch --no-tags --no-recurse-submodules upstream "refs/tags/$UP_TAG:refs/tags/$UP_TAG"
           if ! git merge-base --is-ancestor "$UP_TAG" HEAD; then
             if ! git rebase "$UP_TAG"; then
@@ -63,6 +64,11 @@ jobs:
               exit 1
             fi
           fi
+          # The push token cannot write .github/workflows, so keep the files the
+          # remote branch already carries. Upstream's CI is irrelevant on a fork.
+          git rm -r --cached --ignore-unmatch .github/workflows >/dev/null 2>&1 || true
+          git checkout "$ORIG_SHA" -- .github/workflows 2>/dev/null || true
+          git diff --cached --quiet || git commit --amend --no-edit
           echo "release_tag=${UP_TAG}-4g.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
